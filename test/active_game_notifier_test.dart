@@ -65,7 +65,17 @@ void main() {
     expect(restored!.players.length, 2);
     expect(restored.players.any((p) => p.name == 'Carl'), isTrue);
     // Late joiner gets one buy-in by default.
-    expect(restored.totalBuyInChips(lateId), restored.chipsPerBuyIn);
+    expect(restored.totalBuyInChips(lateId!), restored.chipsPerBuyIn);
+  });
+
+  test('adding a duplicate name is rejected', () async {
+    final alice = Player(name: 'Alice');
+    final c1 = await freshContainer();
+    final notifier = c1.read(activeGameProvider.notifier);
+    notifier.startGame(GameSession(players: [alice]));
+
+    expect(notifier.addPlayer('alice'), isNull); // case-insensitive
+    expect(c1.read(activeGameProvider)!.players.length, 1);
   });
 
   test('removing a player deletes them and their ledger entries', () async {
@@ -98,5 +108,40 @@ void main() {
 
     notifier.clearCashOut(alice.id);
     expect(c1.read(activeGameProvider)!.hasCashedOut(alice.id), isFalse);
+  });
+
+  test('moveBuyIn shifts one stack from giver to receiver', () async {
+    final alice = Player(name: 'Alice');
+    final bob = Player(name: 'Bob');
+
+    final c1 = await freshContainer();
+    final notifier = c1.read(activeGameProvider.notifier);
+    notifier.startGame(GameSession(players: [alice, bob]));
+    notifier.setBuyInCount(alice.id, 3); // 1500 chips
+    notifier.setBuyInCount(bob.id, 1); // 500 chips
+
+    final moved = notifier.moveBuyIn(alice.id, bob.id);
+    expect(moved, isTrue);
+
+    final s = c1.read(activeGameProvider)!;
+    expect(s.totalBuyInChips(alice.id), 1000); // 3 -> 2 buy-ins
+    expect(s.totalBuyInChips(bob.id), 1000); // 1 -> 2 buy-ins
+  });
+
+  test('moveBuyIn fails when the giver has no stack to give', () async {
+    final alice = Player(name: 'Alice');
+    final bob = Player(name: 'Bob');
+
+    final c1 = await freshContainer();
+    final notifier = c1.read(activeGameProvider.notifier);
+    notifier.startGame(GameSession(players: [alice, bob]));
+    notifier.setBuyInCount(alice.id, 1);
+    notifier.setBuyInCount(bob.id, 1);
+    // Alice already gave her chips away (stack below one buy-in).
+    notifier.moveBuyIn(alice.id, bob.id); // Alice now 0 buy-ins, 0 chips
+
+    final again = notifier.moveBuyIn(alice.id, bob.id);
+    expect(again, isFalse);
+    expect(c1.read(activeGameProvider)!.totalBuyInChips(bob.id), 1000);
   });
 }

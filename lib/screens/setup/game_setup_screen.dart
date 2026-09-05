@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/utils/avatar_colors.dart';
 import '../../models/game_session.dart';
 import '../../models/player.dart';
 import '../../providers/game_providers.dart';
+import '../../providers/people_providers.dart';
+import '../../providers/splitwise_providers.dart';
+import '../../widgets/player_avatar.dart';
 import '../game_table/game_table_screen.dart';
+import 'splitwise_picker_screen.dart';
 
 /// Configure chip/currency rules, seat "Ghost" players, and start a game.
 class GameSetupScreen extends ConsumerStatefulWidget {
@@ -28,7 +33,8 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
   final _nameController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
-  final List<String> _playerNames = [];
+  final List<Player> _players = [];
+  String? _splitwiseGroupId;
   String? _error;
 
   @override
@@ -41,22 +47,58 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
   }
 
   void _addPlayer() {
-    final name = _nameController.text.trim();
+    _addNamedPlayer(_nameController.text);
+    _nameController.clear();
+  }
+
+  void _addNamedPlayer(String rawName) {
+    final name = rawName.trim();
     if (name.isEmpty) return;
+    if (_players.any((p) => p.name.toLowerCase() == name.toLowerCase())) {
+      setState(() => _error = 'A player named "$name" is already added.');
+      return;
+    }
     setState(() {
-      _playerNames.add(name);
-      _nameController.clear();
+      _players.add(Player(
+        name: name,
+        avatarColorHex: AvatarColors.next(_players.map((p) => p.avatarColorHex)),
+      ));
       _error = null;
     });
   }
 
   void _removePlayer(int index) {
-    setState(() => _playerNames.removeAt(index));
+    setState(() => _players.removeAt(index));
+  }
+
+  Future<void> _importFromSplitwise() async {
+    final result = await Navigator.of(context).push<SplitwiseImport>(
+      MaterialPageRoute(builder: (_) => const SplitwisePickerScreen()),
+    );
+    if (result == null) return;
+    setState(() {
+      _splitwiseGroupId = result.groupId;
+      final existingIds = _players
+          .map((p) => p.splitwiseUserId)
+          .whereType<String>()
+          .toSet();
+      for (final player in result.players) {
+        final dupName =
+            _players.any((p) => p.name.toLowerCase() == player.name.toLowerCase());
+        if (!existingIds.contains(player.splitwiseUserId) && !dupName) {
+          _players.add(player.copyWith(
+            avatarColorHex:
+                AvatarColors.next(_players.map((p) => p.avatarColorHex)),
+          ));
+        }
+      }
+      _error = null;
+    });
   }
 
   void _startGame() {
     if (!_formKey.currentState!.validate()) return;
-    if (_playerNames.length < 2) {
+    if (_players.length < 2) {
       setState(() => _error = 'Add at least 2 players to start a game.');
       return;
     }
@@ -64,13 +106,14 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
     final chips = int.parse(_chipsController.text.trim());
     final divisor = double.parse(_divisorController.text.trim());
     final currency = _currencyController.text.trim().toUpperCase();
-    final players = _playerNames.map((name) => Player(name: name)).toList();
+    final players = List<Player>.from(_players);
 
     final session = GameSession(
       chipsPerBuyIn: chips,
       chipToCurrencyDivisor: divisor,
       currencyCode: currency,
       players: players,
+      splitwiseGroupId: _splitwiseGroupId,
     );
 
     final notifier = ref.read(activeGameProvider.notifier);
@@ -145,6 +188,14 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
             const SizedBox(height: 24),
             Text('Players', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
+            if (ref.watch(splitwiseConnectionProvider).valueOrNull != null) ...[
+              OutlinedButton.icon(
+                onPressed: _importFromSplitwise,
+                icon: const Icon(Icons.groups_outlined),
+                label: const Text('Import from Splitwise'),
+              ),
+              const SizedBox(height: 8),
+            ],
             Row(
               children: [
                 Expanded(
@@ -158,11 +209,16 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
                 IconButton.filled(onPressed: _addPlayer, icon: const Icon(Icons.add)),
               ],
             ),
+            _SuggestionChips(
+              seatedNames: _players.map((p) => p.name).toList(),
+              onPick: _addNamedPlayer,
+            ),
             const SizedBox(height: 8),
-            for (var i = 0; i < _playerNames.length; i++)
+            for (var i = 0; i < _players.length; i++)
               ListTile(
-                title: Text(_playerNames[i]),
-                leading: const Icon(Icons.person_outline),
+                title: Text(_players[i].name),
+                leading: PlayerAvatar(player: _players[i], radius: 16),
+                subtitle: _players[i].isGhost ? null : const Text('Splitwise'),
                 trailing: IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () => _removePlayer(i),
@@ -179,6 +235,41 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Tappable chips of previously-seen player names not yet seated this game.
+class _SuggestionChips extends ConsumerWidget {
+  const _SuggestionChips({required this.seatedNames, required this.onPick});
+
+  final List<String> seatedNames;
+  final void Function(String name) onPick;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final seated = seatedNames.map((n) => n.toLowerCase()).toSet();
+    final suggestions = ref
+        .watch(knownPlayerNamesProvider)
+        .where((n) => !seated.contains(n.toLowerCase()))
+        .take(10)
+        .toList();
+    if (suggestions.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (final name in suggestions)
+            ActionChip(
+              avatar: const Icon(Icons.person_add_alt, size: 18),
+              label: Text(name),
+              onPressed: () => onPick(name),
+            ),
+        ],
       ),
     );
   }

@@ -1,24 +1,36 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/utils/currency_formatter.dart';
 import '../../models/game_session.dart';
 import '../../models/settlement_transaction.dart';
 import '../../providers/game_providers.dart';
+import '../../providers/people_providers.dart';
+import '../../providers/splitwise_providers.dart';
 import '../../services/settlement/settlement_engine.dart';
+import '../../services/splitwise/splitwise_expense_builder.dart';
 import '../../widgets/game_stats_bar.dart';
 
 /// Shows each player's result, flags any buy-in/cash-out mismatch, and lists
 /// the minimal settlement transactions in a copy-paste-ready block for
 /// manually adding as Splitwise expenses.
 class SettlementResultScreen extends ConsumerWidget {
-  const SettlementResultScreen({super.key, this.session});
+  SettlementResultScreen({super.key, this.session});
 
   /// Pass an explicit [session] when viewing a saved game from History.
   /// Leave null to read the currently active game.
   final GameSession? session;
+
+  /// Boundary around the result content, captured for "Share as image".
+  final GlobalKey _shareBoundaryKey = GlobalKey();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -58,62 +70,94 @@ class SettlementResultScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (!isBalanced)
-            Card(
-              color: Colors.red.withValues(alpha: 0.1),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    const Icon(Icons.warning_amber, color: Colors.red),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Total buy-in ($totalBuyIn chips) does not match total '
-                        'cash-out ($totalCashOut chips). Double-check entries — '
-                        'the settlement below may be incomplete.',
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontWeight: FontWeight.bold,
+          RepaintBoundary(
+            key: _shareBoundaryKey,
+            child: Container(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              padding: const EdgeInsets.all(4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Poker Night · ${DateFormat.yMMMd().format(activeSession.createdAt)}',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  if (!isBalanced)
+                    Card(
+                      color: Colors.red.withValues(alpha: 0.1),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber, color: Colors.red),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Total buy-in ($totalBuyIn chips) does not match total '
+                                'cash-out ($totalCashOut chips). Double-check entries — '
+                                'the settlement below may be incomplete.',
+                                style: const TextStyle(
+                                  color: Colors.red,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  const SizedBox(height: 8),
+                  Text('Player Results', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  for (final player in activeSession.players)
+                    _PlayerResultTile(session: activeSession, playerId: player.id),
+                  const SizedBox(height: 24),
+                  Text('Settlement', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  if (transactions.isEmpty)
+                    const Text('No transactions needed — everyone is even.')
+                  else
+                    for (final tx in transactions)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.arrow_forward),
+                        title: Text('${nameFor(tx.fromPlayerId)} pays ${nameFor(tx.toPlayerId)}'),
+                        trailing: Text(
+                          CurrencyFormatter.format(tx.amount, currencyCode: activeSession.currencyCode),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                ],
               ),
             ),
-          const SizedBox(height: 8),
-          Text('Player Results', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          for (final player in activeSession.players)
-            _PlayerResultTile(session: activeSession, playerId: player.id),
-          const SizedBox(height: 24),
-          Text('Settlement', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          if (transactions.isEmpty)
-            const Text('No transactions needed — everyone is even.')
-          else
-            for (final tx in transactions)
-              ListTile(
-                leading: const Icon(Icons.arrow_forward),
-                title: Text('${nameFor(tx.fromPlayerId)} pays ${nameFor(tx.toPlayerId)}'),
-                trailing: Text(
-                  CurrencyFormatter.format(tx.amount, currencyCode: activeSession.currencyCode),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
+          ),
           const SizedBox(height: 24),
           FilledButton.icon(
+            icon: const Icon(Icons.share),
+            label: const Text('Share'),
+            onPressed: () => _showShareSheet(context, activeSession, transactions, nameFor),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
             icon: const Icon(Icons.copy),
             label: const Text('Copy for Splitwise'),
             onPressed: () => _copySummary(context, activeSession, transactions, nameFor),
           ),
+          if (ref.watch(splitwiseConnectionProvider).valueOrNull != null) ...[
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: const Text('Push to Splitwise'),
+              onPressed: () => _pushToSplitwise(context, ref, activeSession),
+            ),
+          ],
           if (session == null) ...[
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.save_outlined),
-              label: const Text('Save to History'),
-              onPressed: () => _saveToHistory(context, ref, activeSession),
+            FilledButton.tonalIcon(
+              icon: const Icon(Icons.flag_outlined),
+              label: const Text('Finish Game'),
+              onPressed: () => _finishGame(context, ref, activeSession),
             ),
           ],
         ],
@@ -180,21 +224,169 @@ class SettlementResultScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _saveToHistory(
+  void _showShareSheet(
+    BuildContext context,
+    GameSession session,
+    List<SettlementTransaction> transactions,
+    String Function(String) nameFor,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.text_snippet_outlined),
+              title: const Text('Share as text'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _shareText(session, transactions, nameFor);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('Share as image'),
+              subtitle: const Text('Save to gallery from the share sheet'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _shareImage(context, session);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _shareText(
+    GameSession session,
+    List<SettlementTransaction> transactions,
+    String Function(String) nameFor,
+  ) async {
+    await Share.share(
+      _buildSummary(session, transactions, nameFor),
+      subject: 'Poker Night Settlement',
+    );
+  }
+
+  Future<void> _shareImage(BuildContext context, GameSession session) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final boundary = _shareBoundaryKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) return;
+      final image = await boundary.toImage(pixelRatio: 3);
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (bytes == null) return;
+      final pngBytes = bytes.buffer.asUint8List();
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/poker_settlement_${session.id}.png');
+      await file.writeAsBytes(pngBytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'image/png')],
+        subject: 'Poker Night Settlement',
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not create image. Try text share.')),
+      );
+    }
+  }
+
+  Future<void> _finishGame(
     BuildContext context,
     WidgetRef ref,
     GameSession session,
   ) async {
     final notifier = ref.read(activeGameProvider.notifier);
     notifier.markSettled();
-    final settledSession = ref.read(activeGameProvider);
-    if (settledSession != null) {
-      await ref.read(localStorageServiceProvider).saveSession(settledSession);
-    }
+    notifier.saveToHistory();
     notifier.clearGame();
+    // Refresh history + leaderboard so the finished game shows up immediately.
+    ref.invalidate(historySessionsProvider);
     if (context.mounted) {
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
+  }
+
+  Future<void> _pushToSplitwise(
+    BuildContext context,
+    WidgetRef ref,
+    GameSession session,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = SplitwiseExpenseBuilder.build(session);
+    if (result.everyoneEven) {
+      _snack(messenger, 'Everyone is even — nothing to push.');
+      return;
+    }
+    if (!result.isPushable) {
+      _snack(
+        messenger,
+        'These players aren\'t linked to Splitwise: '
+        '${result.unlinkedPlayers.join(', ')}. Settle them manually or use Copy.',
+      );
+      return;
+    }
+
+    final groupId = session.splitwiseGroupId ?? await _pickGroup(context, ref, messenger);
+    if (groupId == null) return;
+
+    messenger.showSnackBar(const SnackBar(content: Text('Pushing to Splitwise…')));
+    try {
+      await ref.read(splitwiseServiceProvider).createSettlementExpense(
+            groupId: groupId,
+            description: 'Poker Night ${DateFormat.yMMMd().format(session.createdAt)}',
+            currencyCode: session.currencyCode,
+            draft: result.draft!,
+          );
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Pushed to Splitwise ✓')),
+      );
+    } catch (_) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Push failed. Try again or use Copy.')),
+      );
+    }
+  }
+
+  /// Lets the user pick which Splitwise group the expense lands in.
+  Future<String?> _pickGroup(
+    BuildContext context,
+    WidgetRef ref,
+    ScaffoldMessengerState messenger,
+  ) async {
+    List<Map<String, dynamic>> groups;
+    try {
+      groups = await ref.read(splitwiseServiceProvider).getGroups();
+    } catch (_) {
+      _snack(messenger, 'Could not load Splitwise groups.');
+      return null;
+    }
+    if (!context.mounted) return null;
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Choose a Splitwise group'),
+        children: [
+          for (final group in groups)
+            if ((group['id']).toString() != '0')
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(ctx).pop(group['id'].toString()),
+                child: Text(group['name']?.toString() ?? 'Group'),
+              ),
+        ],
+      ),
+    );
+  }
+
+  void _snack(ScaffoldMessengerState messenger, String message) {
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 }
 

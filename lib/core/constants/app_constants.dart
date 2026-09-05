@@ -22,4 +22,11 @@ class AppConstants {
   /// is explicitly saved to history or deleted.
   static const String hiveActiveGameBoxName = 'active_game';
   static const String activeGameKey = 'current';
+
+  /// General app preferences (theme, etc.).
+  static const String hiveSettingsBoxName = 'settings';
+  static const String themeModeKey = 'themeMode';
+
+  /// Persistent people (merged identities) for the leaderboard.
+  static const String hivePeopleBoxName = 'people';
 }

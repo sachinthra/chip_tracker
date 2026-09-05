@@ -5,8 +5,11 @@ import '../../core/utils/currency_formatter.dart';
 import '../../models/game_session.dart';
 import '../../models/player.dart';
 import '../../providers/game_providers.dart';
+import '../../providers/people_providers.dart';
 import '../../widgets/game_stats_bar.dart';
+import '../../widgets/player_avatar.dart';
 import '../settlement/settlement_result_screen.dart';
+import 'table_view_screen.dart';
 
 /// Enter each player's buy-ins and, at the end of the night, their final
 /// chip count. Drag-and-drop lending comes later — for now this is a manual
@@ -46,49 +49,49 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
       context: context,
       builder: (_) => const _AddPlayerDialog(),
     );
-    if (name != null && name.isNotEmpty) {
-      ref.read(activeGameProvider.notifier).addPlayer(name);
+    if (name == null || name.isEmpty) return;
+    final id = ref.read(activeGameProvider.notifier).addPlayer(name);
+    if (id == null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('A player named "$name" is already at the table.')),
+      );
     }
   }
 
   void _onCalculate() {
+    // The game is always kept in the History Vault; tally time is a natural
+    // save point so it shows up even before the user taps "Finish".
+    ref.read(activeGameProvider.notifier).saveToHistory();
+    ref.invalidate(historySessionsProvider);
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SettlementResultScreen()),
+      MaterialPageRoute(builder: (_) => SettlementResultScreen()),
     );
   }
 
-  Future<void> _handleBackNavigation(GameSession session) async {
-    final choice = await showDialog<String>(
+  Future<void> _confirmDelete() async {
+    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Leave Game?'),
+        title: const Text('Delete Game?'),
         content: const Text(
-          'Your progress is saved automatically and will be here when you '
-          'come back. You can also delete this game instead.',
+          'This permanently removes the in-progress game. This cannot be undone.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('cancel'),
+            onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('delete'),
+            onPressed: () => Navigator.of(ctx).pop(true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete Game'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop('save'),
-            child: const Text('Save & Exit'),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
-
-    if (choice == 'delete') {
+    if (ok == true) {
       ref.read(activeGameProvider.notifier).clearGame();
-    }
-    if ((choice == 'save' || choice == 'delete') && mounted) {
-      Navigator.of(context).pop();
+      if (mounted) Navigator.of(context).pop();
     }
   }
 
@@ -113,20 +116,34 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
     final cashedOutCount =
         session.players.where((p) => session.hasCashedOut(p.id)).length;
 
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        _handleBackNavigation(session);
-      },
-      child: Scaffold(
+    // No leave-confirmation needed: progress auto-saves, so exiting (back)
+    // simply returns home with the game resumable.
+    return Scaffold(
         appBar: AppBar(
           title: const Text('Game Table'),
           actions: [
             IconButton(
+              tooltip: 'Table view',
+              icon: const Icon(Icons.blur_circular),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TableViewScreen()),
+              ),
+            ),
+            IconButton(
               tooltip: 'Add player',
               icon: const Icon(Icons.person_add_alt_1),
               onPressed: _addPlayerDialog,
+            ),
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'delete') _confirmDelete();
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Delete game'),
+                ),
+              ],
             ),
           ],
           bottom: GameStatsBar(
@@ -175,7 +192,6 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
             ),
           ),
         ),
-      ),
     );
   }
 }
@@ -247,6 +263,18 @@ class _PlayerEntryCard extends ConsumerWidget {
       currencyCode: session.currencyCode,
     );
 
+    // Keep the field in sync with the session so a cash-out entered elsewhere
+    // (e.g. the table view) shows here. Safe during typing: keystrokes commit
+    // to the session immediately, so the two only differ on an external change.
+    final desiredText =
+        hasCashedOut ? session.totalCashOutChips(player.id).toString() : '';
+    if (cashOutController.text != desiredText) {
+      cashOutController.value = TextEditingValue(
+        text: desiredText,
+        selection: TextSelection.collapsed(offset: desiredText.length),
+      );
+    }
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -255,6 +283,8 @@ class _PlayerEntryCard extends ConsumerWidget {
           children: [
             Row(
               children: [
+                PlayerAvatar(player: player, radius: 16),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     player.name,

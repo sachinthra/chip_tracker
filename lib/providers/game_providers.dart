@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/utils/avatar_colors.dart';
 import '../services/local/local_storage_service.dart';
 import '../services/settlement/settlement_engine.dart';
 import '../services/splitwise/splitwise_service.dart';
@@ -89,11 +90,18 @@ class ActiveGameNotifier extends Notifier<GameSession?> {
   }
 
   /// Seats a new player mid-game (a late joiner). Gives them [buyInCount]
-  /// initial buy-ins. Returns the created player's id.
-  String addPlayer(String name, {int buyInCount = 1}) {
+  /// initial buy-ins. Returns the created player's id, or null if a player
+  /// with the same name already exists.
+  String? addPlayer(String name, {int buyInCount = 1}) {
     final session = state;
-    final player = Player(name: name.trim());
-    if (session == null) return player.id;
+    if (session == null) return null;
+    if (session.hasPlayerNamed(name)) return null;
+    final player = Player(
+      name: name.trim(),
+      avatarColorHex: AvatarColors.next(
+        session.players.map((p) => p.avatarColorHex),
+      ),
+    );
     final buyIns = List.generate(
       buyInCount,
       (_) => LedgerEntry.buyIn(playerId: player.id, chips: session.chipsPerBuyIn),
@@ -132,10 +140,45 @@ class ActiveGameNotifier extends Notifier<GameSession?> {
     _commit(session.copyWith(ledger: [...otherEntries, ...buyIns]));
   }
 
+  /// Moves one buy-in (a single 500 stack) from [fromId] to [toId]: the giver's
+  /// buy-in count drops by one, the receiver's rises by one. Returns false if
+  /// the giver has no buy-in left or fewer than one stack of chips to hand over.
+  bool moveBuyIn(String fromId, String toId) {
+    final session = state;
+    if (session == null) return false;
+    final fromCount =
+        session.totalBuyInChips(fromId) ~/ session.chipsPerBuyIn;
+    if (fromCount < 1) return false;
+    if (session.currentChipStack(fromId) < session.chipsPerBuyIn) return false;
+
+    var removedOne = false;
+    final ledger = <LedgerEntry>[];
+    for (final entry in session.ledger) {
+      if (!removedOne &&
+          entry.type == LedgerEntryType.buyIn &&
+          entry.toPlayerId == fromId) {
+        removedOne = true; // drop exactly one of the giver's buy-ins
+        continue;
+      }
+      ledger.add(entry);
+    }
+    ledger.add(LedgerEntry.buyIn(playerId: toId, chips: session.chipsPerBuyIn));
+    _commit(session.copyWith(ledger: ledger));
+    return true;
+  }
+
   void markSettled() {
     final session = state;
     if (session == null) return;
     _commit(session.copyWith(status: GameSessionStatus.settled));
+  }
+
+  /// Saves the current game into the History Vault (idempotent — keyed by id,
+  /// so re-saving just updates the existing entry).
+  void saveToHistory() {
+    final session = state;
+    if (session == null) return;
+    ref.read(localStorageServiceProvider).saveSession(session);
   }
 
   /// Discards the in-progress game entirely (explicit delete, or after it's

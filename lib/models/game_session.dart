@@ -44,6 +44,12 @@ class GameSession {
 
   double chipsToCurrency(int chips) => chips * currencyPerChip;
 
+  /// Whether a player named [name] already exists (case-insensitive, trimmed).
+  bool hasPlayerNamed(String name) {
+    final needle = name.trim().toLowerCase();
+    return players.any((p) => p.name.trim().toLowerCase() == needle);
+  }
+
   /// Total chips [playerId] has bought in for (money they've put in so far).
   int totalBuyInChips(String playerId) => ledger
       .where((e) => e.type == LedgerEntryType.buyIn && e.toPlayerId == playerId)

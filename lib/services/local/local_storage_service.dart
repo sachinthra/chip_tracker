@@ -3,6 +3,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../models/game_session.dart';
+import '../../models/person_profile.dart';
 
 /// Offline-first persistence for game sessions ("History Vault"), backed by
 /// Hive. Sessions are stored as plain JSON maps so no generated TypeAdapters
@@ -10,6 +11,8 @@ import '../../models/game_session.dart';
 class LocalStorageService {
   Box<Map>? _box;
   Box<Map>? _activeGameBox;
+  Box? _settingsBox;
+  Box<Map>? _peopleBox;
 
   Future<void> init() async {
     await Hive.initFlutter();
@@ -28,6 +31,8 @@ class LocalStorageService {
   Future<void> _openBoxes() async {
     _box = await Hive.openBox<Map>(AppConstants.hiveGameSessionsBoxName);
     _activeGameBox = await Hive.openBox<Map>(AppConstants.hiveActiveGameBoxName);
+    _settingsBox = await Hive.openBox(AppConstants.hiveSettingsBoxName);
+    _peopleBox = await Hive.openBox<Map>(AppConstants.hivePeopleBoxName);
   }
 
   Box<Map> get _requireBox {
@@ -81,5 +86,29 @@ class LocalStorageService {
 
   Future<void> clearActiveGame() async {
     await _requireActiveGameBox.delete(AppConstants.activeGameKey);
+  }
+
+  /// Persisted theme preference: 'system' | 'light' | 'dark'. Null if unset.
+  String? getThemeMode() =>
+      _settingsBox?.get(AppConstants.themeModeKey) as String?;
+
+  Future<void> saveThemeMode(String mode) async {
+    await _settingsBox?.put(AppConstants.themeModeKey, mode);
+  }
+
+  List<PersonProfile> getAllProfiles() {
+    final box = _peopleBox;
+    if (box == null) return [];
+    return box.values
+        .map((json) => PersonProfile.fromJson(Map<String, dynamic>.from(json)))
+        .toList();
+  }
+
+  Future<void> saveProfile(PersonProfile profile) async {
+    await _peopleBox?.put(profile.id, profile.toJson());
+  }
+
+  Future<void> deleteProfile(String id) async {
+    await _peopleBox?.delete(id);
   }
 }

@@ -1,13 +1,14 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'splitwise_expense_builder.dart';
+
 /// Thin client for the Splitwise REST API (v3).
 ///
-/// Auth is TODO: Splitwise supports either OAuth2 or a static API key issued
-/// per-app from https://secure.splitwise.com/apps. Until we decide which one
-/// to implement, [setApiToken] lets us bootstrap with a personal API key so
-/// the rest of the app (group/friend lookups, expense creation) can be built
-/// and tested end-to-end.
+/// Auth uses a personal API key (Bearer token) that the host generates once
+/// from https://secure.splitwise.com/apps and enters in Settings. This keeps
+/// a home game friction-free: only the host connects an account, and their
+/// account creates the settlement expense that Splitwise then shows everyone.
 class SplitwiseService {
   SplitwiseService({Dio? dio, FlutterSecureStorage? secureStorage})
       : _dio = dio ??
@@ -85,6 +86,34 @@ class SplitwiseService {
         'users__1__paid_share': '0.00',
         'users__1__owed_share': amount.toStringAsFixed(2),
       },
+      options: await _authOptions(),
+    );
+    return response.data as Map<String, dynamic>;
+  }
+
+  /// Pushes the whole night as a single combined expense built from each
+  /// player's net result (winners paid, losers owe).
+  Future<Map<String, dynamic>> createSettlementExpense({
+    required String groupId,
+    required String description,
+    required String currencyCode,
+    required SplitwiseExpenseDraft draft,
+  }) async {
+    final data = <String, dynamic>{
+      'cost': draft.cost.toStringAsFixed(2),
+      'description': description,
+      'currency_code': currencyCode,
+      'group_id': groupId,
+    };
+    for (var i = 0; i < draft.shares.length; i++) {
+      final share = draft.shares[i];
+      data['users__${i}__user_id'] = share.userId;
+      data['users__${i}__paid_share'] = share.paidShare.toStringAsFixed(2);
+      data['users__${i}__owed_share'] = share.owedShare.toStringAsFixed(2);
+    }
+    final response = await _dio.post(
+      '/create_expense',
+      data: data,
       options: await _authOptions(),
     );
     return response.data as Map<String, dynamic>;
