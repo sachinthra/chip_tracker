@@ -1,30 +1,43 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:track_app/main.dart';
+import 'package:track_app/providers/game_providers.dart';
+import 'package:track_app/services/local/local_storage_service.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  late Directory tempDir;
+  late LocalStorageService storage;
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  // Real dart:io calls must happen outside testWidgets' fake-async zone,
+  // otherwise Hive's file I/O never completes and the test hangs.
+  setUpAll(() async {
+    tempDir = await Directory.systemTemp.createTemp('track_app_test');
+    storage = LocalStorageService();
+    await storage.initForTesting(tempDir.path);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  tearDownAll(() => tempDir.delete(recursive: true));
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('Home screen shows entry points', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localStorageServiceProvider.overrideWithValue(storage),
+        ],
+        child: const PokerCompanionApp(),
+      ),
+    );
+
+    expect(find.text('Start New Game'), findsOneWidget);
+    expect(find.text('History Vault'), findsOneWidget);
+
+    await tester.tap(find.text('Start New Game'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Game'), findsWidgets);
+    expect(find.text('Chip Settings'), findsOneWidget);
   });
 }
