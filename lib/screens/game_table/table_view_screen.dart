@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/utils/avatar_colors.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/game_session.dart';
 import '../../models/player.dart';
 import '../../providers/game_providers.dart';
+import '../../widgets/cash_out_dialog.dart';
 import '../../widgets/player_avatar.dart';
 
 /// Interactive "poker table": the Bank sits in the middle; players ring it.
@@ -174,6 +176,10 @@ class _PlayerNode extends ConsumerWidget {
           textAlign: TextAlign.center,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
+        _BuyInPips(
+          count: session.totalBuyInChips(player.id) ~/ session.chipsPerBuyIn,
+          color: AvatarColors.fromHex(player.avatarColorHex),
+        ),
         Text(
           subtitle,
           textAlign: TextAlign.center,
@@ -219,7 +225,8 @@ class _PlayerNode extends ConsumerWidget {
           final data = details.data;
           return data.isBank || data.player?.id != player.id;
         },
-        onAcceptWithDetails: (details) => _onDrop(context, ref, details.data),
+        onAcceptWithDetails: (details) =>
+            _onDrop(context, ref, details.data, details.offset),
         builder: (context, candidate, rejected) {
           final highlighted = candidate.isNotEmpty;
           return AnimatedScale(
@@ -232,19 +239,51 @@ class _PlayerNode extends ConsumerWidget {
     );
   }
 
-  void _onDrop(BuildContext context, WidgetRef ref, _DragPayload data) {
+  void _onDrop(
+    BuildContext context,
+    WidgetRef ref,
+    _DragPayload data,
+    Offset dropGlobal,
+  ) {
     if (data.isBank) {
       HapticFeedback.lightImpact();
       ref.read(activeGameProvider.notifier).recordBuyIn(player.id);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('+${session.chipsPerBuyIn} chips to ${player.name}'),
-          duration: const Duration(milliseconds: 900),
-        ),
-      );
+      _showChipFly(context, dropGlobal, '+${session.chipsPerBuyIn}');
     } else if (data.player != null) {
       _confirmTransfer(context, ref, from: data.player!, to: player);
     }
+  }
+
+  /// Floats a "+chips" badge up from [globalOffset] and fades it out.
+  void _showChipFly(BuildContext context, Offset globalOffset, String label) {
+    final overlay = Overlay.of(context);
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        left: globalOffset.dx - 24,
+        top: globalOffset.dy - 24,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 700),
+            builder: (context, t, child) => Opacity(
+              opacity: (1 - t).clamp(0.0, 1.0),
+              child: Transform.translate(offset: Offset(0, -44 * t), child: child),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: Chip(
+                avatar: const Icon(Icons.paid, size: 18),
+                label: Text(label),
+                backgroundColor: Colors.green.shade100,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    Future.delayed(const Duration(milliseconds: 720), entry.remove);
   }
 
   Future<void> _confirmTransfer(
@@ -280,6 +319,15 @@ class _PlayerNode extends ConsumerWidget {
           ref.read(activeGameProvider.notifier).moveBuyIn(from.id, to.id);
       if (moved) {
         HapticFeedback.lightImpact();
+        if (!context.mounted) return;
+        final box = context.findRenderObject() as RenderBox?;
+        if (box != null) {
+          _showChipFly(
+            context,
+            box.localToGlobal(box.size.center(Offset.zero)),
+            '+${session.chipsPerBuyIn}',
+          );
+        }
       } else {
         messenger.showSnackBar(
           SnackBar(
@@ -353,7 +401,7 @@ class _PlayerNode extends ConsumerWidget {
   Future<void> _cashOutDialog(BuildContext context, WidgetRef ref) async {
     final chips = await showDialog<int>(
       context: context,
-      builder: (_) => _CashOutDialog(
+      builder: (_) => CashOutDialog(
         playerName: player.name,
         initialChips: session.hasCashedOut(player.id)
             ? session.totalCashOutChips(player.id)
@@ -366,54 +414,39 @@ class _PlayerNode extends ConsumerWidget {
   }
 }
 
-/// Cash-out entry dialog owning its own controller (disposed after the route
-/// is removed, avoiding the "_dependents.isEmpty" assertion).
-class _CashOutDialog extends StatefulWidget {
-  const _CashOutDialog({required this.playerName, this.initialChips});
+/// Small chip dots under an avatar showing how many buy-ins a player has taken.
+class _BuyInPips extends StatelessWidget {
+  const _BuyInPips({required this.count, required this.color});
 
-  final String playerName;
-  final int? initialChips;
-
-  @override
-  State<_CashOutDialog> createState() => _CashOutDialogState();
-}
-
-class _CashOutDialogState extends State<_CashOutDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialChips?.toString() ?? '');
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final value = int.tryParse(_controller.text.trim());
-    Navigator.of(context).pop(value);
-  }
+  final int count;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('${widget.playerName} cash-out'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        keyboardType: TextInputType.number,
-        decoration: const InputDecoration(
-          labelText: 'Final chip count',
-          border: OutlineInputBorder(),
-        ),
-        onSubmitted: (_) => _submit(),
+    if (count <= 0) return const SizedBox(height: 4);
+    final shown = count.clamp(0, 6);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (var i = 0; i < shown; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 1),
+              child: Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+            ),
+          if (count > 6)
+            Padding(
+              padding: const EdgeInsets.only(left: 2),
+              child: Text('+${count - 6}',
+                  style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+            ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('Save')),
-      ],
     );
   }
 }

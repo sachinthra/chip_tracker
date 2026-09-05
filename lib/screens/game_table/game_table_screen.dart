@@ -6,9 +6,11 @@ import '../../models/game_session.dart';
 import '../../models/player.dart';
 import '../../providers/game_providers.dart';
 import '../../providers/people_providers.dart';
+import '../../widgets/cash_out_dialog.dart';
 import '../../widgets/game_stats_bar.dart';
 import '../../widgets/player_avatar.dart';
 import '../settlement/settlement_result_screen.dart';
+import '../side_games/dice_roller_screen.dart';
 import 'table_view_screen.dart';
 
 /// Enter each player's buy-ins and, at the end of the night, their final
@@ -123,6 +125,13 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
           title: const Text('Game Table'),
           actions: [
             IconButton(
+              tooltip: 'Dice roll',
+              icon: const Icon(Icons.casino),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DiceRollerScreen()),
+              ),
+            ),
+            IconButton(
               tooltip: 'Table view',
               icon: const Icon(Icons.blur_circular),
               onPressed: () => Navigator.of(context).push(
@@ -165,7 +174,9 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
-            for (final player in session.players)
+            // Active players in entry order, then cashed-out players collapsed
+            // at the bottom.
+            for (final player in _activePlayers(session))
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: _PlayerEntryCard(
@@ -174,6 +185,12 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
                   cashOutController: _controllerFor(player.id, session),
                   onChanged: () => setState(() {}),
                 ),
+              ),
+            for (final player in _cashedOut(session))
+              _CashedOutTile(
+                session: session,
+                player: player,
+                onChanged: () => setState(() {}),
               ),
             const SizedBox(height: 4),
             OutlinedButton.icon(
@@ -194,6 +211,12 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
         ),
     );
   }
+
+  List<Player> _activePlayers(GameSession session) =>
+      session.players.where((p) => !session.hasCashedOut(p.id)).toList();
+
+  List<Player> _cashedOut(GameSession session) =>
+      session.players.where((p) => session.hasCashedOut(p.id)).toList();
 }
 
 class _PlayerEntryCard extends ConsumerWidget {
@@ -362,6 +385,82 @@ class _PlayerEntryCard extends ConsumerWidget {
                     : null,
               ),
               onChanged: (value) => _commitCashOut(ref, value),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact row for a player who has cashed out — declutters the list. Tap to
+/// edit their final chip count or move them back to "still playing".
+class _CashedOutTile extends ConsumerWidget {
+  const _CashedOutTile({
+    required this.session,
+    required this.player,
+    required this.onChanged,
+  });
+
+  final GameSession session;
+  final Player player;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final net = session.netResultFor(player.id);
+    final netColor = net >= 0 ? Colors.green[700] : Colors.red[700];
+    final netText = '${net >= 0 ? '+' : '-'}'
+        '${CurrencyFormatter.format(net.abs(), currencyCode: session.currencyCode)}';
+
+    return Card(
+      child: ListTile(
+        dense: true,
+        leading: PlayerAvatar(player: player, radius: 14),
+        title: Text(player.name),
+        subtitle: Text('Cashed out ${session.totalCashOutChips(player.id)} chips'),
+        trailing: Text(
+          netText,
+          style: TextStyle(color: netColor, fontWeight: FontWeight.bold),
+        ),
+        onTap: () => _showActions(context, ref),
+      ),
+    );
+  }
+
+  void _showActions(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: const Text('Edit cash-out'),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                final chips = await showDialog<int>(
+                  context: context,
+                  builder: (_) => CashOutDialog(
+                    playerName: player.name,
+                    initialChips: session.totalCashOutChips(player.id),
+                  ),
+                );
+                if (chips != null) {
+                  ref.read(activeGameProvider.notifier).recordCashOut(player.id, chips);
+                  onChanged();
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.undo),
+              title: const Text('Still playing'),
+              onTap: () {
+                ref.read(activeGameProvider.notifier).clearCashOut(player.id);
+                Navigator.of(sheetContext).pop();
+                onChanged();
+              },
             ),
           ],
         ),
