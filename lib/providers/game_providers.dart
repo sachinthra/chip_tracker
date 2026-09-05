@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/utils/avatar_colors.dart';
+import '../services/backup/backup_service.dart';
 import '../services/local/local_storage_service.dart';
 import '../services/settlement/settlement_engine.dart';
 import '../services/splitwise/splitwise_service.dart';
@@ -17,6 +18,10 @@ final localStorageServiceProvider = Provider<LocalStorageService>((ref) {
 
 final splitwiseServiceProvider = Provider<SplitwiseService>((ref) {
   return SplitwiseService();
+});
+
+final backupServiceProvider = Provider<BackupService>((ref) {
+  return BackupService(ref.watch(localStorageServiceProvider));
 });
 
 /// Holds the currently active game (null when no game is in progress) and

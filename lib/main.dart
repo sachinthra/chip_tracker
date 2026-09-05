@@ -35,7 +35,7 @@ class PokerCompanionApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
-      title: 'Poker Companion',
+      title: 'Chip Tracker',
       theme: ThemeData(colorSchemeSeed: Colors.green, useMaterial3: true),
       darkTheme: ThemeData(
         colorSchemeSeed: Colors.green,
@@ -95,7 +95,7 @@ class HomeScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Poker Companion'),
+        title: const Text('Chip Tracker'),
         actions: [
           _ThemeMenuButton(),
           IconButton(
@@ -125,7 +125,7 @@ class HomeScreen extends ConsumerWidget {
                     size: 36, color: theme.colorScheme.onPrimaryContainer),
               ),
               const SizedBox(height: 12),
-              Text('Poker Companion',
+              Text('Chip Tracker',
                   style: theme.textTheme.headlineSmall
                       ?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),

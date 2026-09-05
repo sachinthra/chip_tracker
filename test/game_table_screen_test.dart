@@ -50,16 +50,13 @@ void main() {
     await tester.tap(find.byIcon(Icons.person_add_alt_1).first);
     await tester.pumpAndSettle();
 
-    expect(find.byType(AlertDialog), findsOneWidget);
+    final sheetField = find.byKey(const Key('addPlayerField'));
+    expect(sheetField, findsOneWidget);
 
-    final dialogField = find.descendant(
-      of: find.byType(AlertDialog),
-      matching: find.byType(TextField),
-    );
-    await tester.enterText(dialogField, 'Carl');
-    await tester.tap(find.text('Add'));
-    // pumpAndSettle runs the dialog dismiss animation — the old crash
-    // (_dependents.isEmpty) fired here when the controller was disposed early.
+    await tester.enterText(sheetField, 'Carl');
+    await tester.pumpAndSettle();
+    // "Carl" isn't a past player, so the sheet offers an "Add" row.
+    await tester.tap(find.text('Add "Carl"'));
     await tester.pumpAndSettle();
 
     expect(container.read(activeGameProvider)!.players.length, 3);

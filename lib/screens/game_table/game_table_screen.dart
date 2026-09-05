@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/utils/avatar_colors.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/game_session.dart';
 import '../../models/player.dart';
@@ -11,6 +12,7 @@ import '../../widgets/game_stats_bar.dart';
 import '../../widgets/player_avatar.dart';
 import '../settlement/settlement_result_screen.dart';
 import '../side_games/dice_roller_screen.dart';
+import '../side_games/side_pot_calculator_screen.dart';
 import 'table_view_screen.dart';
 
 /// Enter each player's buy-ins and, at the end of the night, their final
@@ -47,9 +49,11 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
   }
 
   Future<void> _addPlayerDialog() async {
-    final name = await showDialog<String>(
+    final name = await showModalBottomSheet<String>(
       context: context,
-      builder: (_) => const _AddPlayerDialog(),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const _AddPlayerSheet(),
     );
     if (name == null || name.isEmpty) return;
     final id = ref.read(activeGameProvider.notifier).addPlayer(name);
@@ -125,13 +129,6 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
           title: const Text('Game Table'),
           actions: [
             IconButton(
-              tooltip: 'Dice roll',
-              icon: const Icon(Icons.casino),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DiceRollerScreen()),
-              ),
-            ),
-            IconButton(
               tooltip: 'Table view',
               icon: const Icon(Icons.blur_circular),
               onPressed: () => Navigator.of(context).push(
@@ -139,15 +136,32 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
               ),
             ),
             IconButton(
-              tooltip: 'Add player',
-              icon: const Icon(Icons.person_add_alt_1),
-              onPressed: _addPlayerDialog,
+              tooltip: 'Dice roll',
+              icon: const Icon(Icons.casino),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DiceRollerScreen()),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Side-pot calculator',
+              icon: const Icon(Icons.calculate_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SidePotCalculatorScreen()),
+              ),
             ),
             PopupMenuButton<String>(
               onSelected: (v) {
-                if (v == 'delete') _confirmDelete();
+                if (v == 'addplayer') {
+                  _addPlayerDialog();
+                } else if (v == 'delete') {
+                  _confirmDelete();
+                }
               },
               itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'addplayer',
+                  child: Text('Add player'),
+                ),
                 const PopupMenuItem(
                   value: 'delete',
                   child: Text('Delete game'),
@@ -469,18 +483,20 @@ class _CashedOutTile extends ConsumerWidget {
   }
 }
 
-/// Name-entry dialog for seating a new player. Owns its own controller so it
-/// is disposed only after the route is fully removed (avoids the
-/// "_dependents.isEmpty" assertion from disposing while still mounted).
-class _AddPlayerDialog extends StatefulWidget {
-  const _AddPlayerDialog();
+/// Add-player bottom sheet: a search field that filters past players as you
+/// type, over a scrollable list. Resizes above the keyboard and scales to any
+/// number of regulars (fixing the old dialog's overflow). Returns the chosen
+/// or typed name via [Navigator.pop].
+class _AddPlayerSheet extends ConsumerStatefulWidget {
+  const _AddPlayerSheet();
 
   @override
-  State<_AddPlayerDialog> createState() => _AddPlayerDialogState();
+  ConsumerState<_AddPlayerSheet> createState() => _AddPlayerSheetState();
 }
 
-class _AddPlayerDialogState extends State<_AddPlayerDialog> {
+class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
   final _controller = TextEditingController();
+  String _query = '';
 
   @override
   void dispose() {
@@ -488,29 +504,87 @@ class _AddPlayerDialogState extends State<_AddPlayerDialog> {
     super.dispose();
   }
 
-  void _submit() => Navigator.of(context).pop(_controller.text.trim());
+  void _add(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isNotEmpty) Navigator.of(context).pop(trimmed);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Add Player'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        textCapitalization: TextCapitalization.words,
-        decoration: const InputDecoration(labelText: 'Player name'),
-        onSubmitted: (_) => _submit(),
+    final seated = ref
+            .watch(activeGameProvider)
+            ?.players
+            .map((p) => p.name.toLowerCase())
+            .toSet() ??
+        <String>{};
+    final all = ref
+        .watch(knownPlayerNamesProvider)
+        .where((n) => !seated.contains(n.toLowerCase()))
+        .toList();
+    final query = _query.trim();
+    final q = query.toLowerCase();
+    final filtered =
+        q.isEmpty ? all : all.where((n) => n.toLowerCase().contains(q)).toList();
+    final exactMatch = all.any((n) => n.toLowerCase() == q);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              key: const Key('addPlayerField'),
+              controller: _controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Player name',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+              onSubmitted: _add,
+            ),
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 300),
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                if (query.isNotEmpty && !exactMatch)
+                  ListTile(
+                    leading: const CircleAvatar(child: Icon(Icons.add)),
+                    title: Text('Add "$query"'),
+                    onTap: () => _add(query),
+                  ),
+                for (final name in filtered)
+                  ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: AvatarColors.fromHex(
+                        AvatarColors.palette[
+                            name.hashCode.abs() % AvatarColors.palette.length],
+                      ),
+                      child: Text(
+                        name.isEmpty ? '?' : name[0].toUpperCase(),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    title: Text(name),
+                    onTap: () => _add(name),
+                  ),
+                if (filtered.isEmpty && query.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('No past players yet — type a name above.'),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Add'),
-        ),
-      ],
     );
   }
 }

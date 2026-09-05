@@ -58,9 +58,16 @@ dependencies:
   share_plus: ^10.1.4
   path_provider: ^2.1.5
 
+  # Picking a backup file to import history/profiles
+  file_picker: ^8.1.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # App launcher icon + native splash generation (build-time only)
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -68,6 +75,23 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+# Launcher icon: transparent chip PNG (no adaptive background square).
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/chip_tracker.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  background_color_ios: "#212121"
+
+# Native launch splash: chip centered on neutral dark grey (not green).
+flutter_native_splash:
+  color: "#424242"
+  image: assets/icon/chip_tracker_fg.png
+  android_12:
+    color: "#424242"
+    image: assets/icon/chip_tracker_fg.png
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
