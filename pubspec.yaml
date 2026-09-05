@@ -1,4 +1,4 @@
-name: track_app
+name: chip_tracker
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -76,14 +76,16 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
-# Launcher icon: transparent chip PNG (no adaptive background square).
+# Launcher icon: green chip icon (full image) + adaptive layers for masking.
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icon/chip_tracker.png"
+  adaptive_icon_background: "#185335"
+  adaptive_icon_foreground: "assets/icon/chip_tracker_fg.png"
   min_sdk_android: 21
   remove_alpha_ios: true
-  background_color_ios: "#212121"
+  background_color_ios: "#185335"
 
 # Native launch splash: chip centered on neutral dark grey (not green).
 flutter_native_splash:

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:track_app/services/side_pot/side_pot_calculator.dart';
+import 'package:chip_tracker/services/side_pot/side_pot_calculator.dart';
 
 void main() {
   group('SidePotCalculator', () {

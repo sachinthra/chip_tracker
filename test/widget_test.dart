@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:track_app/main.dart';
-import 'package:track_app/providers/game_providers.dart';
-import 'package:track_app/services/local/local_storage_service.dart';
+import 'package:chip_tracker/main.dart';
+import 'package:chip_tracker/providers/game_providers.dart';
+import 'package:chip_tracker/services/local/local_storage_service.dart';
 
 void main() {
   late Directory tempDir;

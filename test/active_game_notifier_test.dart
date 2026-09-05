@@ -3,10 +3,10 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:track_app/models/game_session.dart';
-import 'package:track_app/models/player.dart';
-import 'package:track_app/providers/game_providers.dart';
-import 'package:track_app/services/local/local_storage_service.dart';
+import 'package:chip_tracker/models/game_session.dart';
+import 'package:chip_tracker/models/player.dart';
+import 'package:chip_tracker/providers/game_providers.dart';
+import 'package:chip_tracker/services/local/local_storage_service.dart';
 
 void main() {
   late Directory tempDir;

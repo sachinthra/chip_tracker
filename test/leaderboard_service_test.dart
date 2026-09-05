@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:track_app/models/game_session.dart';
-import 'package:track_app/models/ledger_entry.dart';
-import 'package:track_app/models/person_profile.dart';
-import 'package:track_app/models/player.dart';
-import 'package:track_app/services/leaderboard/leaderboard_service.dart';
+import 'package:chip_tracker/models/game_session.dart';
+import 'package:chip_tracker/models/ledger_entry.dart';
+import 'package:chip_tracker/models/person_profile.dart';
+import 'package:chip_tracker/models/player.dart';
+import 'package:chip_tracker/services/leaderboard/leaderboard_service.dart';
 
 void main() {
   // A finished 2-player game where [winner] beats [loser] by one 500 stack.
