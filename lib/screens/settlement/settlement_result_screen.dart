@@ -59,8 +59,6 @@ class SettlementResultScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Settlement'),
         bottom: GameStatsBar(
-          buyInAmount: activeSession.chipsToCurrency(totalBuyIn),
-          cashOutAmount: activeSession.chipsToCurrency(totalCashOut),
           totalProfit: totalProfit,
           isBalanced: isBalanced,
           diffChips: totalCashOut - totalBuyIn,

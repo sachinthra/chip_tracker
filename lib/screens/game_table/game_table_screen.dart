@@ -27,6 +27,15 @@ class GameTableScreen extends ConsumerStatefulWidget {
 
 class _GameTableScreenState extends ConsumerState<GameTableScreen> {
   final Map<String, TextEditingController> _cashOutControllers = {};
+  final Map<String, FocusNode> _cashOutFocusNodes = {};
+
+  /// Player whose cash-out field is currently focused. Kept in the active list
+  /// while editing so recording a value mid-typing doesn't collapse the card
+  /// out from under the keyboard.
+  String? _editingPlayerId;
+
+  /// Bottom-nav tab: 0 = Table, 1 = Players, 2 = Tools.
+  int _tab = 0;
 
   /// Returns the cash-out controller for [playerId], seeding it once from the
   /// persisted cash-out value so early-leavers' amounts survive a restart.
@@ -40,10 +49,30 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
     });
   }
 
+  /// Focus node per player; while focused the player stays in the active list.
+  FocusNode _focusNodeFor(String playerId) {
+    return _cashOutFocusNodes.putIfAbsent(playerId, () {
+      final node = FocusNode();
+      node.addListener(() {
+        if (node.hasFocus) {
+          if (_editingPlayerId != playerId) {
+            setState(() => _editingPlayerId = playerId);
+          }
+        } else if (_editingPlayerId == playerId) {
+          setState(() => _editingPlayerId = null);
+        }
+      });
+      return node;
+    });
+  }
+
   @override
   void dispose() {
     for (final controller in _cashOutControllers.values) {
       controller.dispose();
+    }
+    for (final node in _cashOutFocusNodes.values) {
+      node.dispose();
     }
     super.dispose();
   }
@@ -119,118 +148,163 @@ class _GameTableScreenState extends ConsumerState<GameTableScreen> {
       final net = session.netResultFor(p.id);
       return sum + (net > 0 ? net : 0);
     });
-    final cashedOutCount =
-        session.players.where((p) => session.hasCashedOut(p.id)).length;
+
+    const titles = ['Table', 'Players', 'Tools'];
 
     // No leave-confirmation needed: progress auto-saves, so exiting (back)
     // simply returns home with the game resumable.
     return Scaffold(
-        appBar: AppBar(
-          title: const Text('Game Table'),
-          actions: [
-            IconButton(
-              tooltip: 'Table view',
-              icon: const Icon(Icons.blur_circular),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const TableViewScreen()),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Dice roll',
-              icon: const Icon(Icons.casino),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DiceRollerScreen()),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Side-pot calculator',
-              icon: const Icon(Icons.calculate_outlined),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SidePotCalculatorScreen()),
-              ),
-            ),
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'addplayer') {
-                  _addPlayerDialog();
-                } else if (v == 'delete') {
-                  _confirmDelete();
-                }
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'addplayer',
-                  child: Text('Add player'),
-                ),
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Delete game'),
-                ),
-              ],
-            ),
-          ],
-          bottom: GameStatsBar(
-            buyInAmount: session.chipsToCurrency(totalBuyInChips),
-            cashOutAmount: session.chipsToCurrency(totalCashOutChips),
-            totalProfit: totalProfit,
-            isBalanced: isBalanced,
-            diffChips: diffChips,
-            currencyCode: session.currencyCode,
-          ),
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
+      appBar: AppBar(
+        title: Text(titles[_tab]),
+        actions: [
+          // Calculate is irrelevant on the Tools tab.
+          if (_tab != 2)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                '$cashedOutCount of ${session.players.length} cashed out',
-                style: Theme.of(context).textTheme.bodySmall,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              child: FilledButton.tonal(
+                onPressed: _onCalculate,
+                child: const Text('Settle'),
               ),
             ),
-            // Active players in entry order, then cashed-out players collapsed
-            // at the bottom.
-            for (final player in _activePlayers(session))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _PlayerEntryCard(
-                  session: session,
-                  player: player,
-                  cashOutController: _controllerFor(player.id, session),
-                  onChanged: () => setState(() {}),
-                ),
-              ),
-            for (final player in _cashedOut(session))
-              _CashedOutTile(
-                session: session,
-                player: player,
-                onChanged: () => setState(() {}),
-              ),
-            const SizedBox(height: 4),
-            OutlinedButton.icon(
-              onPressed: _addPlayerDialog,
-              icon: const Icon(Icons.person_add_alt_1),
-              label: const Text('Add Player'),
-            ),
-          ],
-        ),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: FilledButton(
-              onPressed: _onCalculate,
-              child: const Text('Calculate Settlement'),
-            ),
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'addplayer') {
+                _addPlayerDialog();
+              } else if (v == 'delete') {
+                _confirmDelete();
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'addplayer', child: Text('Add player')),
+              const PopupMenuItem(value: 'delete', child: Text('Delete game')),
+            ],
           ),
+        ],
+        bottom: GameStatsBar(
+          totalProfit: totalProfit,
+          isBalanced: isBalanced,
+          diffChips: diffChips,
+          currencyCode: session.currencyCode,
         ),
+      ),
+      body: IndexedStack(
+        index: _tab,
+        children: [
+          const TableViewBody(),
+          _buildEntryList(context, session),
+          const _ToolsTab(),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.blur_circular_outlined),
+            selectedIcon: Icon(Icons.blur_circular),
+            label: 'Table',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups),
+            label: 'Players',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.casino_outlined),
+            selectedIcon: Icon(Icons.casino),
+            label: 'Tools',
+          ),
+        ],
+      ),
     );
   }
 
-  List<Player> _activePlayers(GameSession session) =>
-      session.players.where((p) => !session.hasCashedOut(p.id)).toList();
+  Widget _buildEntryList(BuildContext context, GameSession session) {
+    final cashedOutCount =
+        session.players.where((p) => session.hasCashedOut(p.id)).length;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            '$cashedOutCount of ${session.players.length} cashed out',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        // Active players in entry order, then cashed-out players collapsed
+        // at the bottom.
+        for (final player in _activePlayers(session))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _PlayerEntryCard(
+              session: session,
+              player: player,
+              cashOutController: _controllerFor(player.id, session),
+              cashOutFocusNode: _focusNodeFor(player.id),
+              onChanged: () => setState(() {}),
+            ),
+          ),
+        for (final player in _cashedOut(session))
+          _CashedOutTile(
+            session: session,
+            player: player,
+            onChanged: () => setState(() {}),
+          ),
+        const SizedBox(height: 4),
+        OutlinedButton.icon(
+          onPressed: _addPlayerDialog,
+          icon: const Icon(Icons.person_add_alt_1),
+          label: const Text('Add Player'),
+        ),
+      ],
+    );
+  }
 
-  List<Player> _cashedOut(GameSession session) =>
-      session.players.where((p) => session.hasCashedOut(p.id)).toList();
+  List<Player> _activePlayers(GameSession session) => session.players
+      .where((p) => !session.hasCashedOut(p.id) || p.id == _editingPlayerId)
+      .toList();
+
+  List<Player> _cashedOut(GameSession session) => session.players
+      .where((p) => session.hasCashedOut(p.id) && p.id != _editingPlayerId)
+      .toList();
+}
+
+/// Tools tab: the side utilities, made discoverable instead of hidden behind
+/// unlabeled app-bar icons.
+class _ToolsTab extends StatelessWidget {
+  const _ToolsTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.casino),
+            title: const Text('Dice roller'),
+            subtitle: const Text('Pick a dealer or break a tie'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DiceRollerScreen()),
+            ),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.calculate_outlined),
+            title: const Text('Side-pot calculator'),
+            subtitle: const Text('Split an all-in pot fairly'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SidePotCalculatorScreen()),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _PlayerEntryCard extends ConsumerWidget {
@@ -238,12 +312,14 @@ class _PlayerEntryCard extends ConsumerWidget {
     required this.session,
     required this.player,
     required this.cashOutController,
+    required this.cashOutFocusNode,
     required this.onChanged,
   });
 
   final GameSession session;
   final Player player;
   final TextEditingController cashOutController;
+  final FocusNode cashOutFocusNode;
   final VoidCallback onChanged;
 
   void _commitCashOut(WidgetRef ref, String value) {
@@ -301,15 +377,17 @@ class _PlayerEntryCard extends ConsumerWidget {
     );
 
     // Keep the field in sync with the session so a cash-out entered elsewhere
-    // (e.g. the table view) shows here. Safe during typing: keystrokes commit
-    // to the session immediately, so the two only differ on an external change.
-    final desiredText =
-        hasCashedOut ? session.totalCashOutChips(player.id).toString() : '';
-    if (cashOutController.text != desiredText) {
-      cashOutController.value = TextEditingValue(
-        text: desiredText,
-        selection: TextSelection.collapsed(offset: desiredText.length),
-      );
+    // (e.g. the table view) shows here — but never while the user is typing in
+    // it, or we'd fight their keystrokes and jump the cursor.
+    if (!cashOutFocusNode.hasFocus) {
+      final desiredText =
+          hasCashedOut ? session.totalCashOutChips(player.id).toString() : '';
+      if (cashOutController.text != desiredText) {
+        cashOutController.value = TextEditingValue(
+          text: desiredText,
+          selection: TextSelection.collapsed(offset: desiredText.length),
+        );
+      }
     }
 
     return Card(
@@ -377,6 +455,7 @@ class _PlayerEntryCard extends ConsumerWidget {
             const SizedBox(height: 8),
             TextField(
               controller: cashOutController,
+              focusNode: cashOutFocusNode,
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
                 labelText: 'Final chip count (cash-out)',

@@ -16,70 +16,70 @@ import '../../widgets/player_avatar.dart';
 /// - Drag the Bank onto a player to add a buy-in.
 /// - Drag one player onto another to record a chip transfer (loan).
 /// - Tap a player for details and quick actions.
-class TableViewScreen extends ConsumerWidget {
-  const TableViewScreen({super.key});
+///
+/// Rendered as a body (no Scaffold) so it can live inside the game shell's
+/// bottom-nav tabs.
+class TableViewBody extends ConsumerWidget {
+  const TableViewBody({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(activeGameProvider);
     if (session == null) {
-      return const Scaffold(body: Center(child: Text('No active game')));
+      return const Center(child: Text('No active game'));
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Table View')),
-      body: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Text(
-              'Drag the Bank onto a player for a buy-in · drag a player onto '
-              'another to move a buy-in · tap for details',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
+    return Column(
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Text(
+            'Drag the Bank onto a player for a buy-in · drag a player onto '
+            'another to move a buy-in · tap for details',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final size = Size(constraints.maxWidth, constraints.maxHeight);
-                final center = Offset(size.width / 2, size.height / 2);
-                final ringRadius = math.min(size.width, size.height) / 2 - 80;
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final size = Size(constraints.maxWidth, constraints.maxHeight);
+              final center = Offset(size.width / 2, size.height / 2);
+              final ringRadius = math.min(size.width, size.height) / 2 - 80;
 
-                return Stack(
-                  children: [
-                    Center(
-                      child: Container(
-                        width: ringRadius * 2 + 24,
-                        height: ringRadius * 2 + 24,
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.16),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.green.withValues(alpha: 0.4),
-                            width: 3,
-                          ),
+              return Stack(
+                children: [
+                  Center(
+                    child: Container(
+                      width: ringRadius * 2 + 24,
+                      height: ringRadius * 2 + 24,
+                      decoration: BoxDecoration(
+                        color: Colors.green.withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.green.withValues(alpha: 0.4),
+                          width: 3,
                         ),
                       ),
                     ),
-                    _bankNode(context, center),
-                    for (var i = 0; i < session.players.length; i++)
-                      _PlayerNode(
-                        session: session,
-                        player: session.players[i],
-                        size: size,
-                        center: center,
-                        ringRadius: ringRadius,
-                        angle: (2 * math.pi * i / session.players.length) -
-                            math.pi / 2,
-                      ),
-                  ],
-                );
-              },
-            ),
+                  ),
+                  _bankNode(context, center),
+                  for (var i = 0; i < session.players.length; i++)
+                    _PlayerNode(
+                      session: session,
+                      player: session.players[i],
+                      size: size,
+                      center: center,
+                      ringRadius: ringRadius,
+                      angle: (2 * math.pi * i / session.players.length) -
+                          math.pi / 2,
+                    ),
+                ],
+              );
+            },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -399,6 +399,16 @@ class _PlayerNode extends ConsumerWidget {
   }
 
   Future<void> _cashOutDialog(BuildContext context, WidgetRef ref) async {
+    final totalBuyIn = session.players
+        .fold<int>(0, (sum, p) => sum + session.totalBuyInChips(p.id));
+    final totalCashOut = session.players
+        .fold<int>(0, (sum, p) => sum + session.totalCashOutChips(p.id));
+    // Chips still on the table = bought in minus already cashed out. When this
+    // player is editing an existing cash-out, add theirs back so the number
+    // reflects what's left for them to account for.
+    final remaining = totalBuyIn -
+        totalCashOut +
+        session.totalCashOutChips(player.id);
     final chips = await showDialog<int>(
       context: context,
       builder: (_) => CashOutDialog(
@@ -406,6 +416,7 @@ class _PlayerNode extends ConsumerWidget {
         initialChips: session.hasCashedOut(player.id)
             ? session.totalCashOutChips(player.id)
             : null,
+        remainingChips: remaining,
       ),
     );
     if (chips != null) {

@@ -45,7 +45,11 @@ void main() {
       ),
     );
 
-    expect(find.text('Alice'), findsOneWidget);
+    expect(find.text('Alice'), findsWidgets);
+
+    // Per-player entry now lives on the Players tab.
+    await tester.tap(find.byIcon(Icons.groups_outlined));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.person_add_alt_1).first);
     await tester.pumpAndSettle();
@@ -60,7 +64,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(container.read(activeGameProvider)!.players.length, 3);
-    expect(find.text('Carl'), findsOneWidget);
+    expect(find.text('Carl'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 }
