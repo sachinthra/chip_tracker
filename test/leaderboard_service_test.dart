@@ -39,6 +39,43 @@ void main() {
       expect(bob.netTotal, closeTo(-250.0, 0.001));
     });
 
+    test('rating: a settled winner leads and is not provisional', () {
+      final games = [
+        for (var i = 0; i < 5; i++)
+          game('Alice', 'Bob', at: DateTime(2026, 1, 1 + i)),
+      ];
+      final board =
+          LeaderboardService.buildLeaderboard(games: games, profiles: []);
+      final alice = board.firstWhere((e) => e.displayName == 'Alice');
+      final bob = board.firstWhere((e) => e.displayName == 'Bob');
+      expect(board.first.displayName, 'Alice');
+      expect(alice.gamesPlayed, 5);
+      expect(alice.isProvisional, isFalse);
+      expect(alice.rating, greaterThan(1000));
+      expect(bob.rating, lessThan(1000));
+    });
+
+    test('rating: fewer than threshold games stays provisional', () {
+      final board = LeaderboardService.buildLeaderboard(
+          games: [game('Alice', 'Bob')], profiles: []);
+      final alice = board.firstWhere((e) => e.displayName == 'Alice');
+      expect(alice.isProvisional, isTrue);
+      expect(alice.gamesPlayed, 1);
+    });
+
+    test('roi and avgPerGame derive from net vs buy-in', () {
+      final games = [
+        game('Alice', 'Bob', at: DateTime(2026, 1, 1)),
+        game('Alice', 'Bob', at: DateTime(2026, 1, 2)),
+      ];
+      final board =
+          LeaderboardService.buildLeaderboard(games: games, profiles: []);
+      final alice = board.firstWhere((e) => e.displayName == 'Alice');
+      expect(alice.totalBuyIn, closeTo(250.0, 0.001)); // 2 x 125
+      expect(alice.roi, closeTo(1.0, 0.001)); // +250 / 250
+      expect(alice.avgPerGame, closeTo(125.0, 0.001));
+    });
+
     test('a profile merges two typed names into one person', () {
       final games = [
         game('sachin', 'Bob', at: DateTime(2026, 1, 1)),

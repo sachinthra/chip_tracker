@@ -96,6 +96,14 @@ class LocalStorageService {
     await _settingsBox?.put(AppConstants.themeModeKey, mode);
   }
 
+  /// Persisted leaderboard sort metric name. Null if the user never changed it.
+  String? getLeaderboardSort() =>
+      _settingsBox?.get(AppConstants.leaderboardSortKey) as String?;
+
+  Future<void> saveLeaderboardSort(String sortName) async {
+    await _settingsBox?.put(AppConstants.leaderboardSortKey, sortName);
+  }
+
   List<PersonProfile> getAllProfiles() {
     final box = _peopleBox;
     if (box == null) return [];

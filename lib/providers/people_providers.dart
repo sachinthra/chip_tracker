@@ -107,6 +107,30 @@ final leaderboardProvider = Provider<List<LeaderboardEntry>>((ref) {
   return LeaderboardService.buildLeaderboard(games: games, profiles: profiles);
 });
 
+/// The leaderboard sort metric, persisted so the last choice is the default.
+class LeaderboardSortNotifier extends Notifier<LeaderboardSort> {
+  @override
+  LeaderboardSort build() => LeaderboardSort.fromName(
+        ref.read(localStorageServiceProvider).getLeaderboardSort(),
+      );
+
+  void set(LeaderboardSort sort) {
+    state = sort;
+    ref.read(localStorageServiceProvider).saveLeaderboardSort(sort.name);
+  }
+}
+
+final leaderboardSortProvider =
+    NotifierProvider<LeaderboardSortNotifier, LeaderboardSort>(
+        LeaderboardSortNotifier.new);
+
+/// Leaderboard rows ordered by the user's chosen (and persisted) sort metric.
+final sortedLeaderboardProvider = Provider<List<LeaderboardEntry>>((ref) {
+  final entries = ref.watch(leaderboardProvider);
+  final sort = ref.watch(leaderboardSortProvider);
+  return [...entries]..sort(sort.compare);
+});
+
 /// Distinct names ever used, for seating autocomplete.
 final knownPlayerNamesProvider = Provider<List<String>>((ref) {
   final games = ref.watch(historySessionsProvider);

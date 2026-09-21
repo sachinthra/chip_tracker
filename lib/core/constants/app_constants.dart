@@ -27,6 +27,9 @@ class AppConstants {
   static const String hiveSettingsBoxName = 'settings';
   static const String themeModeKey = 'themeMode';
 
+  /// Last-used leaderboard sort metric (persisted as the new default).
+  static const String leaderboardSortKey = 'leaderboardSort';
+
   /// Persistent people (merged identities) for the leaderboard.
   static const String hivePeopleBoxName = 'people';
 }
