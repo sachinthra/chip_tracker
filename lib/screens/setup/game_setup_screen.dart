@@ -201,7 +201,13 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
                 Expanded(
                   child: TextField(
                     controller: _nameController,
-                    decoration: const InputDecoration(labelText: 'Player name'),
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Player name',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                    // Rebuild so the suggestions filter as the user types.
+                    onChanged: (_) => setState(() {}),
                     onSubmitted: (_) => _addPlayer(),
                   ),
                 ),
@@ -210,6 +216,7 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
               ],
             ),
             _SuggestionChips(
+              query: _nameController.text,
               seatedNames: _players.map((p) => p.name).toList(),
               onPick: _addNamedPlayer,
             ),
@@ -241,20 +248,38 @@ class _GameSetupScreenState extends ConsumerState<GameSetupScreen> {
 }
 
 /// Tappable chips of previously-seen player names not yet seated this game.
+/// Filters/sorts by [query] (prefix matches first) so any past player can be
+/// found by typing, instead of having to retype a full name.
 class _SuggestionChips extends ConsumerWidget {
-  const _SuggestionChips({required this.seatedNames, required this.onPick});
+  const _SuggestionChips({
+    required this.query,
+    required this.seatedNames,
+    required this.onPick,
+  });
 
+  final String query;
   final List<String> seatedNames;
   final void Function(String name) onPick;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final seated = seatedNames.map((n) => n.toLowerCase()).toSet();
-    final suggestions = ref
+    final q = query.trim().toLowerCase();
+
+    var names = ref
         .watch(knownPlayerNamesProvider)
         .where((n) => !seated.contains(n.toLowerCase()))
-        .take(10)
         .toList();
+    if (q.isNotEmpty) {
+      names = names.where((n) => n.toLowerCase().contains(q)).toList()
+        ..sort((a, b) {
+          final ap = a.toLowerCase().startsWith(q) ? 0 : 1;
+          final bp = b.toLowerCase().startsWith(q) ? 0 : 1;
+          if (ap != bp) return ap - bp;
+          return a.toLowerCase().compareTo(b.toLowerCase());
+        });
+    }
+    final suggestions = names.take(q.isEmpty ? 12 : 20).toList();
     if (suggestions.isEmpty) return const SizedBox.shrink();
 
     return Padding(
